@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Package,
   Search,
@@ -27,9 +27,18 @@ import {
   Compass,
   Flame,
   BarChart3,
+  Star,
+  Award,
+  SlidersHorizontal,
+  ChevronRight,
+  TrendingUp,
+  Sparkles,
+  Activity,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useLogistics } from '../context/LogisticsContext';
-import { Shipment, ShipmentStatus } from '../types';
+import { Shipment, ShipmentStatus, DeliveryRating } from '../types';
 import { ShipmentQrModal } from './ShipmentQrModal';
 import { CourierFieldRoutesMap, getCourierStatusInfo } from './CourierFieldRoutesMap';
 import { ReactLeafletShipmentsMap } from './ReactLeafletShipmentsMap';
@@ -43,6 +52,8 @@ export const ShipmentsManager: React.FC = () => {
     assignShipmentCourier,
     recordReturnOrPartial,
     setActiveAdminTab,
+    deliveryRatings,
+    getCourierRatingSummary,
   } = useLogistics();
 
   const [viewMode, setViewMode] = useState<'TABLE' | 'MAP' | 'HEATMAP' | 'SPLIT'>('TABLE');
@@ -54,8 +65,17 @@ export const ShipmentsManager: React.FC = () => {
       assignShipmentCourier(tn, courierId);
     });
   };
+
+  // Advanced Filtering System (معلقة، قيد التوصيل، مكتملة، مرتجعات)
+  const [selectedCategory, setSelectedCategory] = useState<'ALL' | 'PENDING' | 'OUT_FOR_DELIVERY' | 'COMPLETED' | 'RETURNS'>('ALL');
+  const [selectedCityFilter, setSelectedCityFilter] = useState<string>('ALL');
+  const [selectedMerchantFilter, setSelectedMerchantFilter] = useState<string>('ALL');
+  const [selectedCourierFilter, setSelectedCourierFilter] = useState<string>('ALL');
+  const [showSideAdminPanel, setShowSideAdminPanel] = useState<boolean>(true);
+
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [viewingRatingModal, setViewingRatingModal] = useState<DeliveryRating | null>(null);
   const [qrModalShipment, setQrModalShipment] = useState<Shipment | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -91,34 +111,126 @@ export const ShipmentsManager: React.FC = () => {
 
   const couriers = staff.filter((s) => s.role === 'COURIER' && s.status !== 'SUSPENDED');
 
-  const statusTabs = [
-    { id: 'ALL', label: 'كافة الشحنات' },
-    { id: 'PENDING_PICKUP', label: 'قيد الاستلام من التاجر' },
-    { id: 'RECEIVED_IN_HUB', label: 'بالمستودع الرئيسي' },
-    { id: 'OUT_FOR_DELIVERY', label: 'مع المندوب للتسليم' },
-    { id: 'DELIVERED', label: 'تم التسليم بنجاح' },
-    { id: 'RETURN_PENDING', label: 'مرتجع / قيد التسوية' },
-  ];
+  // Quick statistics calculated for the Side Admin Panel
+  const categoryStats = useMemo(() => {
+    const total = shipments.length;
+    const pendingList = shipments.filter(
+      (s) => s.status === 'PENDING_PICKUP' || s.status === 'RECEIVED_IN_HUB'
+    );
+    const outList = shipments.filter((s) => s.status === 'OUT_FOR_DELIVERY');
+    const deliveredList = shipments.filter(
+      (s) => s.status === 'DELIVERED' || s.status === 'PARTIAL_DELIVERY'
+    );
+    const returnsList = shipments.filter(
+      (s) => s.status === 'RETURN_PENDING' || s.status === 'RETURNED_TO_MERCHANT'
+    );
 
-  const filteredShipments = shipments.filter((shp) => {
-    const matchesSearch =
-      shp.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      shp.recipientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      shp.recipientPhone.includes(searchQuery) ||
-      shp.merchantName.toLowerCase().includes(searchQuery.toLowerCase());
+    const pendingCod = pendingList.reduce((sum, s) => sum + s.codAmount, 0);
+    const outCod = outList.reduce((sum, s) => sum + s.codAmount, 0);
+    const deliveredCod = deliveredList.reduce(
+      (sum, s) => sum + (s.collectedAmount || s.codAmount),
+      0
+    );
+    const returnsCod = returnsList.reduce((sum, s) => sum + s.codAmount, 0);
 
-    if (!matchesSearch) return false;
+    const ratedList = deliveryRatings || [];
+    const avgRating =
+      ratedList.length > 0
+        ? Number(
+            (ratedList.reduce((sum, r) => sum + r.overallRating, 0) / ratedList.length).toFixed(1)
+          )
+        : 4.9;
 
-    if (selectedStatus === 'ALL') return true;
-    if (selectedStatus === 'RETURN_PENDING') {
-      return (
-        shp.status === 'RETURN_PENDING' ||
-        shp.status === 'RETURNED_TO_MERCHANT' ||
-        shp.status === 'PARTIAL_DELIVERY'
-      );
-    }
-    return shp.status === selectedStatus;
-  });
+    return {
+      total,
+      pending: {
+        count: pendingList.length,
+        pct: total > 0 ? Number(((pendingList.length / total) * 100).toFixed(1)) : 0,
+        cod: pendingCod,
+      },
+      outForDelivery: {
+        count: outList.length,
+        pct: total > 0 ? Number(((outList.length / total) * 100).toFixed(1)) : 0,
+        cod: outCod,
+        activeCouriers: new Set(outList.map((s) => s.assignedCourierId).filter(Boolean)).size,
+      },
+      completed: {
+        count: deliveredList.length,
+        pct: total > 0 ? Number(((deliveredList.length / total) * 100).toFixed(1)) : 0,
+        cod: deliveredCod,
+        avgRating,
+      },
+      returns: {
+        count: returnsList.length,
+        pct: total > 0 ? Number(((returnsList.length / total) * 100).toFixed(1)) : 0,
+        cod: returnsCod,
+      },
+    };
+  }, [shipments, deliveryRatings]);
+
+  // Unique cities list for filtering
+  const availableCities = useMemo(() => {
+    const set = new Set<string>();
+    shipments.forEach((s) => {
+      if (s.city) set.add(s.city);
+    });
+    return Array.from(set);
+  }, [shipments]);
+
+  // Main filtered shipments list
+  const filteredShipments = useMemo(() => {
+    return shipments.filter((shp) => {
+      // 1. Text Search query
+      const matchesSearch =
+        searchQuery === '' ||
+        shp.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        shp.recipientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        shp.recipientPhone.includes(searchQuery) ||
+        shp.merchantName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        shp.address.toLowerCase().includes(searchQuery.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      // 2. Main Classification Category Filter
+      if (selectedCategory === 'PENDING') {
+        if (shp.status !== 'PENDING_PICKUP' && shp.status !== 'RECEIVED_IN_HUB') return false;
+      } else if (selectedCategory === 'OUT_FOR_DELIVERY') {
+        if (shp.status !== 'OUT_FOR_DELIVERY') return false;
+      } else if (selectedCategory === 'COMPLETED') {
+        if (shp.status !== 'DELIVERED' && shp.status !== 'PARTIAL_DELIVERY') return false;
+      } else if (selectedCategory === 'RETURNS') {
+        if (shp.status !== 'RETURN_PENDING' && shp.status !== 'RETURNED_TO_MERCHANT') return false;
+      }
+
+      // 3. City Filter
+      if (selectedCityFilter !== 'ALL' && shp.city !== selectedCityFilter) {
+        return false;
+      }
+
+      // 4. Merchant Filter
+      if (selectedMerchantFilter !== 'ALL' && shp.merchantId !== selectedMerchantFilter) {
+        return false;
+      }
+
+      // 5. Courier Filter
+      if (
+        selectedCourierFilter !== 'ALL' &&
+        shp.assignedCourierId !== selectedCourierFilter &&
+        shp.assignedCourierName !== selectedCourierFilter
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    shipments,
+    searchQuery,
+    selectedCategory,
+    selectedCityFilter,
+    selectedMerchantFilter,
+    selectedCourierFilter,
+  ]);
 
   const handleCreateShipment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -272,65 +384,380 @@ export const ShipmentsManager: React.FC = () => {
         </div>
       )}
 
-      {/* Search and Filters Header (Displayed in TABLE and SPLIT modes) */}
+      {/* Advanced Filtering & Actions Header (Displayed in TABLE and SPLIT modes) */}
       {viewMode !== 'MAP' && viewMode !== 'HEATMAP' && (
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-          {/* Status Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto w-full md:w-auto scrollbar-none pb-1 md:pb-0">
-            {statusTabs.map((tab) => (
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3.5">
+          {/* Row 1: Advanced Category Classification Filter Tabs (معلقة، قيد التوصيل، مكتملة، مرتجعات) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-500 flex items-center gap-1 pl-1">
+                <Filter className="w-3.5 h-3.5 text-amber-500" />
+                <span>تصنيف الحالة:</span>
+              </span>
+
+              {/* All */}
               <button
-                key={tab.id}
-                onClick={() => setSelectedStatus(tab.id)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                  selectedStatus === tab.id
+                onClick={() => setSelectedCategory('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedCategory === 'ALL'
                     ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
-                {tab.label}
+                <Package className="w-3.5 h-3.5" />
+                <span>جميع الشحنات</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  selectedCategory === 'ALL' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {categoryStats.total}
+                </span>
               </button>
-            ))}
-          </div>
 
-          {/* Search & Add Order Button */}
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:w-72">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="بحث برقم البوليصة (SND-..)، العميل، أو التاجر..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg pr-9 pl-3 py-1.5 text-xs text-slate-900 focus:outline-hidden focus:ring-1 focus:ring-slate-900"
-              />
+              {/* Pending */}
+              <button
+                onClick={() => setSelectedCategory('PENDING')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedCategory === 'PENDING'
+                    ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200/60'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>معلقة (بانتظار الاستلام / بالمستودع)</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  selectedCategory === 'PENDING' ? 'bg-slate-950 text-amber-400' : 'bg-amber-200/80 text-amber-900'
+                }`}>
+                  {categoryStats.pending.count}
+                </span>
+              </button>
+
+              {/* Out for Delivery */}
+              <button
+                onClick={() => setSelectedCategory('OUT_FOR_DELIVERY')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedCategory === 'OUT_FOR_DELIVERY'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-blue-50 text-blue-800 hover:bg-blue-100 border border-blue-200/60'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>قيد التوصيل (مع المناديب)</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  selectedCategory === 'OUT_FOR_DELIVERY' ? 'bg-white/25 text-white' : 'bg-blue-200/80 text-blue-900'
+                }`}>
+                  {categoryStats.outForDelivery.count}
+                </span>
+              </button>
+
+              {/* Completed */}
+              <button
+                onClick={() => setSelectedCategory('COMPLETED')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedCategory === 'COMPLETED'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200/60'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>مكتملة التسليم</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  selectedCategory === 'COMPLETED' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
+                }`}>
+                  {categoryStats.completed.count}
+                </span>
+              </button>
+
+              {/* Returns */}
+              <button
+                onClick={() => setSelectedCategory('RETURNS')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedCategory === 'RETURNS'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200/60'
+                }`}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>المرتجعات والجزئي</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  selectedCategory === 'RETURNS' ? 'bg-white/25 text-white' : 'bg-rose-200/80 text-rose-900'
+                }`}>
+                  {categoryStats.returns.count}
+                </span>
+              </button>
             </div>
 
+            {/* Side Admin Panel Toggle */}
             <button
-              onClick={() => setActiveAdminTab('COURIER_REPORTS')}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-black transition-colors shrink-0 shadow-xs cursor-pointer"
-              title="توليد تقارير الأداء الأسبوعية للمناديب ونسب التأخير (Recharts)"
+              onClick={() => setShowSideAdminPanel(!showSideAdminPanel)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                showSideAdminPanel
+                  ? 'bg-amber-500/15 text-amber-800 border border-amber-300'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+              }`}
+              title="إظهار / إخفاء الواجهة الإدارية الجانبية المخصصة للإحصائيات السريعة"
             >
-              <BarChart3 className="w-3.5 h-3.5 text-slate-950" />
-              <span>تقارير أداء المناديب</span>
+              <Activity className="w-3.5 h-3.5 text-amber-600" />
+              <span>الواجهة الإدارية الجانبية</span>
+              {showSideAdminPanel ? (
+                <Eye className="w-3.5 h-3.5 text-amber-600" />
+              ) : (
+                <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+              )}
             </button>
+          </div>
 
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors shrink-0 shadow-xs cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 text-amber-400" />
-              <span>تسجيل شحنة جديدة</span>
-            </button>
+          {/* Row 2: Search, Secondary Dropdown Filters, Reports, and Add Button */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto flex-1">
+              {/* Search Box */}
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="بحث برقم البوليصة (SND-..)، العميل، أو التاجر..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg pr-9 pl-3 py-1.5 text-xs text-slate-900 focus:outline-hidden focus:ring-1 focus:ring-slate-900"
+                />
+              </div>
+
+              {/* City Filter */}
+              <select
+                value={selectedCityFilter}
+                onChange={(e) => setSelectedCityFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-hidden"
+              >
+                <option value="ALL">جميع المحافظات ({availableCities.length})</option>
+                {availableCities.map((city) => (
+                  <option key={city} value={city}>
+                    {city}
+                  </option>
+                ))}
+              </select>
+
+              {/* Courier Filter */}
+              <select
+                value={selectedCourierFilter}
+                onChange={(e) => setSelectedCourierFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-hidden"
+              >
+                <option value="ALL">جميع المناديب ({couriers.length})</option>
+                {couriers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    الكابتن {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto shrink-0 justify-end">
+              <button
+                onClick={() => setActiveAdminTab('COURIER_REPORTS')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-black transition-colors shrink-0 shadow-xs cursor-pointer"
+                title="توليد تقارير الأداء الأسبوعية للمناديب ونسب التأخير (Recharts)"
+              >
+                <BarChart3 className="w-3.5 h-3.5 text-slate-950" />
+                <span>تقارير أداء المناديب</span>
+              </button>
+
+              <button
+                onClick={() => setIsAddModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors shrink-0 shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-amber-400" />
+                <span>تسجيل شحنة جديدة</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Shipments Table (Displayed in TABLE and SPLIT modes) */}
+      {/* Main Content Area: Side Admin Panel + Shipments Table (TABLE and SPLIT modes) */}
       {viewMode !== 'MAP' && viewMode !== 'HEATMAP' && (
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-xs">
-            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
+      <div className="flex flex-col lg:flex-row items-start gap-4">
+        {/* Quick Statistics Side Admin Panel */}
+        {showSideAdminPanel && (
+          <aside className="w-full lg:w-80 shrink-0 space-y-3 animate-in fade-in slide-in-from-right-3">
+            {/* Header */}
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                    <Activity className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-xs text-slate-900">الواجهة الإدارية الجانبية</h4>
+                    <span className="text-[10px] text-slate-400">إحصائيات فورية لكل تصنيف</span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-bold">
+                  مباشر 🟢
+                </span>
+              </div>
+            </div>
+
+            {/* Category Card 1: Pending */}
+            <div
+              onClick={() => setSelectedCategory('PENDING')}
+              className={`p-3.5 rounded-2xl border transition-all cursor-pointer shadow-xs ${
+                selectedCategory === 'PENDING'
+                  ? 'bg-amber-500/10 border-amber-400 ring-2 ring-amber-400/40'
+                  : 'bg-white border-slate-200 hover:border-amber-300 hover:bg-amber-50/30'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">شحنات معلقة</span>
+                    <span className="text-[10px] text-slate-400">بالمستودع وقيد الاستلام</span>
+                  </div>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-base font-black text-amber-700">{categoryStats.pending.count}</span>
+                  <span className="text-[10px] text-slate-400 block">{categoryStats.pending.pct}%</span>
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500">مبالغ COD المعلقة:</span>
+                <span className="font-mono font-bold text-slate-800">
+                  {categoryStats.pending.cod.toLocaleString('ar-EG')} ج.م
+                </span>
+              </div>
+            </div>
+
+            {/* Category Card 2: Out For Delivery */}
+            <div
+              onClick={() => setSelectedCategory('OUT_FOR_DELIVERY')}
+              className={`p-3.5 rounded-2xl border transition-all cursor-pointer shadow-xs ${
+                selectedCategory === 'OUT_FOR_DELIVERY'
+                  ? 'bg-blue-500/10 border-blue-400 ring-2 ring-blue-400/40'
+                  : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center">
+                    <Truck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">قيد التوصيل</span>
+                    <span className="text-[10px] text-slate-400">مع المناديب في الميدان</span>
+                  </div>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-base font-black text-blue-700">{categoryStats.outForDelivery.count}</span>
+                  <span className="text-[10px] text-slate-400 block">{categoryStats.outForDelivery.pct}%</span>
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">المناديب النشطين:</span>
+                  <span className="font-bold text-slate-800">{categoryStats.outForDelivery.activeCouriers} كابتن</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">COD قيد التحصيل:</span>
+                  <span className="font-mono font-bold text-blue-800">
+                    {categoryStats.outForDelivery.cod.toLocaleString('ar-EG')} ج.م
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Category Card 3: Completed with Customer Rating */}
+            <div
+              onClick={() => setSelectedCategory('COMPLETED')}
+              className={`p-3.5 rounded-2xl border transition-all cursor-pointer shadow-xs ${
+                selectedCategory === 'COMPLETED'
+                  ? 'bg-emerald-500/10 border-emerald-400 ring-2 ring-emerald-400/40'
+                  : 'bg-white border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/30'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">مكتملة بنجاح</span>
+                    <span className="text-[10px] text-slate-400">تم التسليم والتحصيل</span>
+                  </div>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-base font-black text-emerald-700">{categoryStats.completed.count}</span>
+                  <span className="text-[10px] text-slate-400 block">{categoryStats.completed.pct}%</span>
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">إجمالي المحصل:</span>
+                  <span className="font-mono font-bold text-emerald-800">
+                    {categoryStats.completed.cod.toLocaleString('ar-EG')} ج.م
+                  </span>
+                </div>
+                <div className="flex items-center justify-between bg-amber-50/80 p-1.5 rounded-lg border border-amber-200/60">
+                  <span className="font-bold text-amber-900 flex items-center gap-1">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                    متوسط تقييم الخدمة:
+                  </span>
+                  <span className="font-mono font-black text-amber-800">
+                    {categoryStats.completed.avgRating} / 5.0
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Category Card 4: Returns */}
+            <div
+              onClick={() => setSelectedCategory('RETURNS')}
+              className={`p-3.5 rounded-2xl border transition-all cursor-pointer shadow-xs ${
+                selectedCategory === 'RETURNS'
+                  ? 'bg-rose-500/10 border-rose-400 ring-2 ring-rose-400/40'
+                  : 'bg-white border-slate-200 hover:border-rose-300 hover:bg-rose-50/30'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center">
+                    <RotateCcw className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">مرتجعات وجزئي</span>
+                    <span className="text-[10px] text-slate-400">طرود معادة للمستودع</span>
+                  </div>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-base font-black text-rose-700">{categoryStats.returns.count}</span>
+                  <span className="text-[10px] text-slate-400 block">{categoryStats.returns.pct}%</span>
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500">قيمة الطرود المرتجعة:</span>
+                <span className="font-mono font-bold text-rose-800">
+                  {categoryStats.returns.cod.toLocaleString('ar-EG')} ج.م
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Filter Reset */}
+            {selectedCategory !== 'ALL' && (
+              <button
+                onClick={() => setSelectedCategory('ALL')}
+                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer text-center"
+              >
+                إلغاء الفلترة وعرض الكل ({categoryStats.total})
+              </button>
+            )}
+          </aside>
+        )}
+
+        {/* Shipments Table Container */}
+        <div className="flex-1 w-full min-w-0 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
               <tr>
                 <th className="py-3 px-4">رقم البوليصة</th>
                 <th className="py-3 px-4">التاجر / المتجر</th>
@@ -417,6 +844,12 @@ export const ShipmentsManager: React.FC = () => {
                               <div className="flex items-center gap-1.5 text-slate-900 font-bold">
                                 <Truck className="w-3.5 h-3.5 text-slate-600" />
                                 <span>{shp.assignedCourierName}</span>
+                                {assignedStaff && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-mono font-bold" title="متوسط تقييم المندوب الميداني">
+                                    <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-500" />
+                                    {getCourierRatingSummary(assignedStaff.id).average}
+                                  </span>
+                                )}
                               </div>
 
                               {statusInfo && (
@@ -519,6 +952,35 @@ export const ShipmentsManager: React.FC = () => {
                             : 'مرتجع'}
                         </span>
                       </span>
+
+                      {/* Customer Rating Indicator for Delivered Shipments */}
+                      {isDelivered && (
+                        <div className="mt-1">
+                          {(() => {
+                            const shpRating = deliveryRatings.find(
+                              (r) => r.shipmentId === shp.id || r.trackingNumber === shp.trackingNumber
+                            );
+                            if (shpRating) {
+                              return (
+                                <button
+                                  onClick={() => setViewingRatingModal(shpRating)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[10px] font-bold hover:bg-amber-100 transition-colors cursor-pointer"
+                                  title="عرض تقييم العميل ورأيه بالخدمة"
+                                >
+                                  <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-500" />
+                                  <span>{shpRating.overallRating}.0 ({shpRating.customerComment ? 'رأي العميل' : 'تقييم'})</span>
+                                </button>
+                              );
+                            }
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] text-slate-400 bg-slate-50 border border-slate-200">
+                                <Star className="w-2.5 h-2.5 text-slate-300" />
+                                <span>بانتظار التقييم</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </td>
 
                     {/* Actions */}
@@ -539,6 +1001,24 @@ export const ShipmentsManager: React.FC = () => {
                         >
                           <QrCode className="w-3.5 h-3.5" />
                         </button>
+
+                        {/* Customer Rating View Button */}
+                        {isDelivered && (
+                          (() => {
+                            const shpRating = deliveryRatings.find(
+                              (r) => r.shipmentId === shp.id || r.trackingNumber === shp.trackingNumber
+                            );
+                            return shpRating ? (
+                              <button
+                                onClick={() => setViewingRatingModal(shpRating)}
+                                title="عرض مراجعة وتقييم العميل"
+                                className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded cursor-pointer"
+                              >
+                                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                              </button>
+                            ) : null;
+                          })()
+                        )}
 
                         {!isDelivered && shp.status !== 'RETURNED_TO_MERCHANT' && (
                           <button
@@ -567,6 +1047,7 @@ export const ShipmentsManager: React.FC = () => {
             <p className="text-xs">لا توجد شحنات تطابق معايير البحث الحالية</p>
           </div>
         )}
+      </div>
       </div>
       )}
 
@@ -1064,6 +1545,135 @@ export const ShipmentsManager: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Rating Details Modal */}
+      {viewingRatingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-slate-800 to-amber-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-400 flex items-center justify-center">
+                  <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm">مراجعة تقييم العميل للخدمة</h3>
+                  <p className="text-[11px] text-slate-300 font-mono">
+                    بوليصة {viewingRatingModal.trackingNumber} | العميل: {viewingRatingModal.customerName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingRatingModal(null)}
+                className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-5 text-xs">
+              {/* Overall Rating Banner */}
+              <div className="bg-gradient-to-br from-amber-500/10 via-amber-400/5 to-slate-50 p-4 rounded-2xl border border-amber-200 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-amber-950 block">التقييم الشامل للخدمة</span>
+                  <div className="flex items-center gap-1 mt-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star
+                        key={star}
+                        className={`w-5 h-5 ${
+                          star <= viewingRatingModal.overallRating
+                            ? 'fill-amber-400 text-amber-500'
+                            : 'text-slate-200'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-2xl font-black text-slate-900">{viewingRatingModal.overallRating}.0</span>
+                  <span className="text-[10px] text-slate-500 block">من 5 نجوم</span>
+                </div>
+              </div>
+
+              {/* Sub-ratings Breakdown */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                  <span className="text-[10px] text-slate-500 block mb-1">سرعة التوصيل</span>
+                  <div className="flex justify-center gap-0.5 text-amber-500 mb-0.5">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                  </div>
+                  <strong className="font-mono text-sm text-slate-800">{viewingRatingModal.deliverySpeedRating}.0 / 5</strong>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                  <span className="text-[10px] text-slate-500 block mb-1">سلوك المندوب</span>
+                  <div className="flex justify-center gap-0.5 text-amber-500 mb-0.5">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                  </div>
+                  <strong className="font-mono text-sm text-slate-800">{viewingRatingModal.courierBehaviorRating}.0 / 5</strong>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                  <span className="text-[10px] text-slate-500 block mb-1">سلامة الطرد</span>
+                  <div className="flex justify-center gap-0.5 text-amber-500 mb-0.5">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                  </div>
+                  <strong className="font-mono text-sm text-slate-800">{viewingRatingModal.parcelConditionRating}.0 / 5</strong>
+                </div>
+              </div>
+
+              {/* Selected Praise Tags */}
+              {viewingRatingModal.tags && viewingRatingModal.tags.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-700 block">وسوم التقييم الإيجابية:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {viewingRatingModal.tags.map((tag, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-full text-[11px] font-semibold"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Customer Comment */}
+              {viewingRatingModal.customerComment ? (
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-600 block mb-1">تعليق العميل:</span>
+                  <p className="text-slate-800 leading-relaxed font-medium text-xs bg-white p-2.5 rounded-xl border border-slate-100">
+                    "{viewingRatingModal.customerComment}"
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 italic text-center py-1">
+                  لم يترك العميل تعليقاً نصياً مكتوباً
+                </p>
+              )}
+
+              {/* Courier & Time Meta */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                <span>المندوب المكلف: <strong>الكابتن {viewingRatingModal.courierName}</strong></span>
+                <span className="font-mono">{new Date(viewingRatingModal.createdAt).toLocaleDateString('ar-EG')}</span>
+              </div>
+
+              {/* Close Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingRatingModal(null)}
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-colors cursor-pointer text-center text-xs"
+                >
+                  إغلاق المراجعة
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

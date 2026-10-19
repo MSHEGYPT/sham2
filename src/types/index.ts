@@ -151,6 +151,7 @@ export interface Shipment {
   coordinates?: { lat: number; lng: number }; // الإحداثيات الجغرافية على الخريطة
   scheduledDeliveryWindow?: string; // نافذة التسليم المجدولة ذكياً
   trafficNotes?: string; // ملاحظات حركة المرور
+  rating?: DeliveryRating; // تقييم العميل بعد استلام الشحنة
   timeline: ShipmentEvent[];
   createdAt: string;
 }
@@ -355,4 +356,57 @@ export interface AppNotification {
     otpSecret?: string;
     address?: string;
   };
+}
+
+// نظام تقييم الخدمة للعملاء (Customer Rating System)
+export interface DeliveryRating {
+  id: string;
+  shipmentId: string;
+  trackingNumber: string;
+  courierId: string;
+  courierName: string;
+  merchantId?: string;
+  merchantName?: string;
+  customerName: string;
+  overallRating: number; // 1 to 5 stars
+  deliverySpeedRating: number; // 1 to 5 stars
+  courierBehaviorRating: number; // 1 to 5 stars
+  parcelConditionRating: number; // 1 to 5 stars
+  feedbackTags: string[]; // e.g. ['تسليم سريع جداً', 'كابتن خلوق ومحترم', 'التزام تام بالموعد', 'الفكة جاهزة']
+  tags?: string[];
+  customerComment?: string;
+  createdAt: string;
+}
+
+// توقعات حركة المرور التاريخية بالذكاء الاصطناعي (AI Traffic Forecast)
+export interface TrafficCongestionPoint {
+  id: string;
+  roadName: string;
+  district: string;
+  coordinates: { lat: number; lng: number };
+  congestionLevel: 'CRITICAL' | 'HEAVY' | 'MODERATE' | 'NORMAL';
+  delayMinutes: number;
+  peakWindow: string;
+  historicalTrend: string;
+  aiRecommendation: string;
+  suggestedDetour: string;
+}
+
+export interface TrafficForecastData {
+  generatedAt: string;
+  currentPeakStatus: 'PEAK' | 'MODERATE' | 'NORMAL';
+  summary: string;
+  averageDelayMinutes: number;
+  chokePoints: TrafficCongestionPoint[];
+  courierSafetyAdvice: string;
+  bestTravelWindows: string[];
+}
+
+// عناصر تخزين ومزامنة localforage بدون اتصال
+export interface OfflineQueuedAction {
+  id: string;
+  actionType: 'UPDATE_STATUS' | 'VERIFY_OTP' | 'RECORD_RATING' | 'RECORD_RETURN' | 'UPDATE_TASK';
+  payload: any;
+  timestamp: number;
+  retryCount: number;
 }

@@ -22,7 +22,14 @@ import { useLogistics } from '../context/LogisticsContext';
 import { StaffMember, StaffRole } from '../types';
 
 export const StaffManagement: React.FC = () => {
-  const { staff, addStaffMember, toggleStaffStatus, recordCashDeposit, setActiveAdminTab } = useLogistics();
+  const {
+    staff,
+    addStaffMember,
+    toggleStaffStatus,
+    recordCashDeposit,
+    setActiveAdminTab,
+    getCourierRatingSummary,
+  } = useLogistics();
 
   const [selectedDepartment, setSelectedDepartment] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -393,11 +400,23 @@ export const StaffManagement: React.FC = () => {
                       </strong>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block">التقييم</span>
-                      <span className="text-amber-600 font-bold flex items-center justify-center gap-0.5">
-                        <Star className="w-3 h-3 fill-amber-400" />
-                        {member.rating}
-                      </span>
+                      <span className="text-[10px] text-slate-400 block">تقييم العملاء</span>
+                      {(() => {
+                        const summary = getCourierRatingSummary(member.id);
+                        const displayRating = summary.totalReviews > 0 ? summary.average : member.rating;
+                        return (
+                          <span
+                            className="text-amber-600 font-bold flex items-center justify-center gap-0.5"
+                            title={`${summary.totalReviews} تقييم مسجل من العملاء الميدانيين`}
+                          >
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                            <span>{displayRating}</span>
+                            {summary.totalReviews > 0 && (
+                              <span className="text-[9px] text-slate-400 font-mono">({summary.totalReviews})</span>
+                            )}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
