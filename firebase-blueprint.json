@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "System authenticated user profile with assigned security ring and role",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "GENERAL_MANAGER", "OPERATIONS", "OPERATIONS_SUPERVISOR", "ACCOUNTANT", "COURIER", "MERCHANT", "CUSTOMER"] },
+        "hierarchyRank": { "type": "number" },
+        "assignedRingLevel": { "type": "number" },
+        "ringName": { "type": "string" },
+        "phone": { "type": "string" },
+        "department": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "role"]
+    },
+    "Shipment": {
+      "title": "Shipment",
+      "description": "Logistics delivery package with tracking, status, and anti-fraud OTP",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "trackingNumber": { "type": "string" },
+        "merchantId": { "type": "string" },
+        "merchantName": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "recipientPhone": { "type": "string" },
+        "city": { "type": "string" },
+        "district": { "type": "string" },
+        "address": { "type": "string" },
+        "itemsDescription": { "type": "string" },
+        "codAmount": { "type": "number" },
+        "collectedAmount": { "type": "number" },
+        "shippingFee": { "type": "number" },
+        "status": { "type": "string" },
+        "otpSecret": { "type": "string" },
+        "assignedCourierId": { "type": "string" },
+        "assignedCourierName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "trackingNumber", "recipientName", "status", "otpSecret"]
+    },
+    "WorkerTask": {
+      "title": "Worker Task",
+      "description": "Operational task assigned to couriers and field agents",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "taskType": { "type": "string" },
+        "assignedCourierId": { "type": "string" },
+        "assignedCourierName": { "type": "string" },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "timeWindow": { "type": "string" },
+        "location": { "type": "string" },
+        "expectedCod": { "type": "number" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "title", "assignedCourierId", "status"]
+    },
+    "StaffMember": {
+      "title": "Staff Member",
+      "description": "Courier or operations staff profile and cash metrics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "phone": { "type": "string" },
+        "nationalId": { "type": "string" },
+        "department": { "type": "string" },
+        "assignedZone": { "type": "string" },
+        "status": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "currentCashHeld": { "type": "number" },
+        "maxCashLimit": { "type": "number" },
+        "totalDelivered": { "type": "number" },
+        "successRate": { "type": "number" },
+        "rating": { "type": "number" },
+        "ringLevel": { "type": "number" }
+      },
+      "required": ["id", "name", "role", "phone"]
+    },
+    "Merchant": {
+      "title": "Merchant Partner",
+      "description": "Merchant business partner with COD balances and payout history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "brandName": { "type": "string" },
+        "phone": { "type": "string" },
+        "businessType": { "type": "string" },
+        "totalShipments": { "type": "number" },
+        "codBalance": { "type": "number" },
+        "pendingPayouts": { "type": "number" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "OnboardingApplication": {
+      "title": "Onboarding Application",
+      "description": "Job seeker application for couriers and field workers with AI clearance audit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "phone": { "type": "string" },
+        "nationalId": { "type": "string" },
+        "desiredRole": { "type": "string" },
+        "assignedZone": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "emergencyContact": { "type": "string" },
+        "aiClearanceScore": { "type": "number" },
+        "aiClearanceReport": { "type": "string" },
+        "status": { "type": "string" },
+        "submittedAt": { "type": "string" }
+      },
+      "required": ["id", "fullName", "phone", "nationalId", "desiredRole", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and credentials"
+    },
+    "/shipments/{shipmentId}": {
+      "schema": "Shipment",
+      "description": "Logistics shipments and parcels"
+    },
+    "/workerTasks/{taskId}": {
+      "schema": "WorkerTask",
+      "description": "Courier dispatch and field task assignments"
+    },
+    "/staff/{staffId}": {
+      "schema": "StaffMember",
+      "description": "Internal staff and courier records"
+    },
+    "/merchants/{merchantId}": {
+      "schema": "Merchant",
+      "description": "Registered merchants and partner accounts"
+    },
+    "/onboardingApplications/{applicationId}": {
+      "schema": "OnboardingApplication",
+      "description": "Job applications and courier onboarding submissions"
+    }
+  }
+}
